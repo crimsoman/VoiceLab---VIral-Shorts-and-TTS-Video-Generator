@@ -1,6 +1,5 @@
 @echo off
 setlocal enabledelayedexpansion
-chcp 65001 >nul
 title VoiceLab Setup
 color 0B
 cd /d "%~dp0"
@@ -16,9 +15,9 @@ echo  VoiceLab needs. Nothing is installed system-wide.
 echo.
 pause
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 1 — Find a usable Python (3.10 - 3.12)
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 1 - Find a usable Python (3.10 - 3.12)
+REM ==========================================================
 echo.
 echo  [1/8] Checking for Python...
 set "PY_CMD="
@@ -70,9 +69,9 @@ if errorlevel 1 (
 )
 echo      OK - using: %PY_CMD%
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 2 — Free disk space check (need ~8GB minimum)
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 2 - Free disk space check (need ~8GB minimum)
+REM ==========================================================
 echo.
 echo  [2/8] Checking free disk space...
 set "FREE_GB=0"
@@ -88,9 +87,9 @@ if !FREE_GB! LSS 8 (
     pause
 )
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 3 — Internet check
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 3 - Internet check
+REM ==========================================================
 echo.
 echo  [3/8] Checking internet connection...
 powershell -NoProfile -Command "try{Invoke-WebRequest -Uri https://pypi.org -TimeoutSec 6 -UseBasicParsing | Out-Null; exit 0}catch{exit 1}" >nul 2>&1
@@ -106,9 +105,9 @@ if errorlevel 1 (
 )
 echo      OK - connected.
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 4 — Port 8080 availability
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 4 - Port 8080 availability
+REM ==========================================================
 echo.
 echo  [4/8] Checking if port 8080 is free...
 netstat -ano | findstr ":8080" | findstr "LISTENING" >nul 2>&1
@@ -125,9 +124,9 @@ if %errorlevel%==0 (
     echo      OK - port 8080 is free.
 )
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 5 — Create/activate virtual environment
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 5 - Create/activate virtual environment
+REM ==========================================================
 echo.
 echo  [5/8] Setting up private Python environment...
 if not exist venv (
@@ -146,9 +145,9 @@ if not exist venv (
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip >nul 2>&1
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 6 — GPU scan, then install matching PyTorch build
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 6 - GPU scan, then install matching PyTorch build
+REM ==========================================================
 echo.
 echo  [6/8] Scanning your PC for a GPU...
 set "GPU_MODE=0"
@@ -176,9 +175,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 7 — Install the rest of the app's requirements
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 7 - Install the rest of the app's requirements
+REM ==========================================================
 echo.
 echo  [7/8] Installing VoiceLab's remaining requirements...
 echo        ^(this can take a few minutes the first time^)
@@ -193,9 +192,9 @@ if errorlevel 1 (
 )
 echo      OK - all core requirements installed.
 
-REM ══════════════════════════════════════════════════════════
-REM STEP 8 — Ollama check (used for AI script writing)
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
+REM STEP 8 - Ollama check (used for AI script writing)
+REM ==========================================================
 echo.
 echo  [8/8] Checking for Ollama ^(needed for AI script writing^)...
 where ollama >nul 2>&1
@@ -229,9 +228,9 @@ if %errorlevel% neq 0 (
     )
 )
 
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
 REM Shortcuts
-REM ══════════════════════════════════════════════════════════
+REM ==========================================================
 echo.
 echo  ==========================================
 echo   Optional: quick-launch shortcuts
