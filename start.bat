@@ -1,6 +1,5 @@
 @echo off
 setlocal enabledelayedexpansion
-chcp 65001 >nul
 title VoiceLab
 color 0A
 cd /d "%~dp0"
@@ -11,7 +10,7 @@ echo   VoiceLab  ^|  AI + TTS + Video Studio
 echo  ==========================================
 echo.
 
-REM ── Make sure setup has actually been run ──────────────────
+REM -- Make sure setup has actually been run ==================
 if not exist "venv\Scripts\activate.bat" (
     color 0C
     echo  [X] VoiceLab hasn't been set up yet on this PC.
@@ -21,7 +20,7 @@ if not exist "venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-REM ── Warn early if port 8080 is already taken ────────────────
+REM -- Warn early if port 8080 is already taken ================
 netstat -ano | findstr ":8080" | findstr "LISTENING" >nul 2>&1
 if %errorlevel%==0 (
     color 0E
