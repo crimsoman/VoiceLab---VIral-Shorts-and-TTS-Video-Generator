@@ -392,13 +392,23 @@ selected_model = "llama3.2:3b"
 # If Ollama IS running and already has model(s) installed, prefer one of
 # those instead - covers the very common case of a user who already has
 # Ollama set up with their own models before ever running VoiceLab.
+#
+# Prefer a plain text model over a vision-language model (name contains
+# "vl", "vision", or "llava") when choosing automatically - VL models are
+# built for image+text input and can behave inconsistently on some Ollama
+# versions when called with text-only /api/chat requests. If only VL
+# models are installed, fall back to whichever is installed anyway rather
+# than leaving the app with no model at all.
 try:
     import httpx as _httpx_boot
     _installed = [m["name"] for m in
                   _httpx_boot.get("http://localhost:11434/api/tags", timeout=2.0)
                   .json().get("models", [])]
     if _installed and selected_model not in _installed:
-        selected_model = _installed[0]
+        _vision_markers = ("vl", "vision", "llava")
+        _text_models = [m for m in _installed
+                         if not any(v in m.lower() for v in _vision_markers)]
+        selected_model = _text_models[0] if _text_models else _installed[0]
         print(f"  Ollama model    [OK]  Using installed model: {selected_model}")
 except Exception:
     pass  # Ollama not running yet - fine, app still starts, Settings tab covers this
@@ -468,6 +478,9 @@ async def chat_stream(req: ChatRequest):
                         "stream": True,
                     },
                 ) as response:
+                    if response.status_code == 404:
+                        yield f"data: {json.dumps({'error': f'Model \"{model_to_use}\" not found in Ollama. Open Settings and pick an installed model.', 'retry': True})}\n\n"
+                        return
                     if response.status_code != 200:
                         yield f"data: {json.dumps({'error': f'Ollama error {response.status_code}', 'retry': True})}\n\n"
                         return
@@ -967,11 +980,13 @@ async def ollama_pull_stream(model_name: str):
     once the pull finishes."""
     async def _stream():
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
+            # 60 min cap - generous enough for large models on slow connections,
+            # but not truly infinite (a dead connection shouldn't hang forever)
+            async with httpx.AsyncClient(timeout=3600.0) as client:
                 async with client.stream(
                     "POST", "http://localhost:11434/api/pull",
                     json={"name": model_name, "stream": True},
-                    timeout=None,
+                    timeout=3600.0,
                 ) as resp:
                     async for line in resp.aiter_lines():
                         if line.strip():
@@ -1304,11 +1319,30 @@ async def generate_edge_tts(text: str, voice: str, rate: str = "+0%", pitch: str
     librosa afterward."""
     communicate = edge_tts.Communicate(text, voice=voice, rate=rate, pitch=pitch)
     mp3_chunks = []
-    
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            mp3_chunks.append(chunk["data"])
-    
+
+    async def _collect():
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                mp3_chunks.append(chunk["data"])
+
+    try:
+        # Hard timeout: Edge TTS is an unofficial network API. If the
+        # connection stalls (firewall, antivirus, ISP filtering, or Microsoft's
+        # endpoint being unreachable), this used to hang forever with no
+        # error - and since the server runs a single async event loop, that
+        # hang could block every other request too. 45s covers even long
+        # scripts on a slow connection; anything past that is a real failure.
+        await asyncio.wait_for(_collect(), timeout=45.0)
+    except asyncio.TimeoutError:
+        raise RuntimeError(
+            "Edge TTS didn't respond within 45 seconds. This usually means "
+            "your firewall/antivirus/network is blocking the connection to "
+            "Microsoft's TTS service - see TROUBLESHOOTING.md."
+        )
+
+    if not mp3_chunks:
+        raise RuntimeError("Edge TTS returned no audio data - try again, or check your internet connection.")
+
     mp3_bytes = io.BytesIO(b"".join(mp3_chunks))
     # Use librosa to load MP3 (no pydub/ffmpeg required)
     audio_np, _ = librosa.load(mp3_bytes, sr=24000, mono=True)
@@ -1990,7 +2024,7 @@ async def generate_clone(req: CloneTTSRequest):
                 edge_path = f"{EXPORTS_DIR}/edge_{uuid.uuid4().hex}.wav"
                 try:
                     comm = edge_tts.Communicate(text=req.text, voice="en-US-AriaNeural", rate="+0%", volume="+0%")
-                    await comm.save(edge_path)
+                    await asyncio.wait_for(comm.save(edge_path), timeout=45.0)
                     tts_audio, _ = librosa.load(edge_path, sr=SR, mono=True)
                 finally:
                     if os.path.exists(edge_path):
@@ -6339,4 +6373,3 @@ async def install_dependency(key: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
-
