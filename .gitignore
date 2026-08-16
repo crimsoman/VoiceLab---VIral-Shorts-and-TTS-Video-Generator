@@ -1,0 +1,39 @@
+# Python environment (each user creates their own via setup.bat)
+venv/
+__pycache__/
+*.pyc
+
+# Downloaded AI models (each user builds their own cache locally)
+hf_cache/
+
+# Generated content / user data - never belongs in the repo
+exports/
+exports.db
+voicelab_settings.json
+*.wav
+*.srt
+*.ass
+*.mp4
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+# Editor junk
+.vscode/
+.idea/
+
+# Old backup/export zips - kept locally, never pushed
+*.zip
+
+# Personal dev notes - kept locally, never pushed
+COPILOT_GUIDE.md
+COPILOT_TTS_FIX.md
+SUMMARY.md
+VIDEO_STUDIO_GUIDE.md
+XTTS_CLONE_GUIDE.md
+
+# Leftovers from the folder-cleanup scan itself
+cleanup_report.txt
+cleanup/
+files claude/

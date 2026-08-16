@@ -1,0 +1,44 @@
+# ══════════════════════════════════════════════════════════════════
+# VoiceLab — base requirements
+#
+# NOTE: torch / torchaudio / torchvision are NOT in this file on purpose.
+# setup.bat installs them separately, choosing a CPU-only build or a
+# GPU (CUDA) build depending on what setup.bat detects on your machine.
+# This file is installed AFTER that torch install.
+#
+# The versions pinned below (transformers/huggingface_hub/tokenizers/
+# safetensors) match the exact versions the app's own in-app
+# "Fix AI Stack" button installs (see INSTALL_COMMANDS in server.py).
+# Keeping them identical here means the optional AI features
+# (AI Thumbnail, AI Music, Parler voice) can be added later from
+# inside the app without pip having to uninstall/reinstall anything
+# that's already here — no version conflicts, no wasted re-downloads.
+# ══════════════════════════════════════════════════════════════════
+
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+psutil
+
+# audio
+soundfile
+librosa
+scipy
+numpy
+
+# TTS engines (core feature — required for the app to even boot)
+edge-tts
+kokoro
+faster-whisper
+
+# video / images
+imageio-ffmpeg
+Pillow
+av
+
+# pinned to match the in-app "Fix AI Stack" installer exactly
+huggingface_hub==0.25.2
+transformers==4.46.3
+tokenizers==0.20.3
+safetensors==0.4.5
