@@ -30,13 +30,26 @@ if %errorlevel%==0 (
     echo.
 )
 
-echo  [1/3] Activating environment...
+echo  [1/4] Activating environment...
 call venv\Scripts\activate.bat
 
-echo  [2/3] Starting server...
+echo  [2/4] Checking for missing packages...
+pip install -r requirements.txt --quiet --disable-pip-version-check
+if errorlevel 1 (
+    color 0C
+    echo.
+    echo  [X] Some required packages are missing and couldn't be
+    echo      installed automatically. Check your internet connection
+    echo      and try again, or see TROUBLESHOOTING.md.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo  [3/4] Starting server...
 start /b "" python server.py
 
-echo  [3/3] Loading models ^(30-45 sec first time^)...
+echo  [4/4] Loading models ^(30-45 sec first time^)...
 
 set c=0
 :check
