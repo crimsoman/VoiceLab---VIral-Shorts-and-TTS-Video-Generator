@@ -432,11 +432,11 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[Message]
-    model: str = "llama3.2:3b"
+    model: Optional[str] = None
 
 class HelperRequest(BaseModel):
     prompt: str
-    model: str = "llama3.2:3b"
+    model: Optional[str] = None
 
 class ModelSelectRequest(BaseModel):
     model: str
@@ -3660,7 +3660,7 @@ class MusicEditRequest(BaseModel):
     edit_instruction: str               # the new edit request, e.g. "make it more energetic and faster"
     duration:         float = 15.0
     seed:             int = -1
-    model:            str = "llama3.2:3b"
+    model:            Optional[str] = None
 
 
 MUSIC_REFINE_PROMPT = """You are refining a music generation prompt based on conversation history.
@@ -3689,7 +3689,7 @@ async def edit_music_ai(req: MusicEditRequest):
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post("http://localhost:11434/api/generate",
-                json={"model": req.model, "prompt": prompt, "stream": False})
+                json={"model": req.model or selected_model, "prompt": prompt, "stream": False})
         refined = res.json().get("response", "").strip().strip('"')
         if not refined:
             refined = (req.history[-1] if req.history else "") + ", " + req.edit_instruction
@@ -3713,7 +3713,7 @@ async def edit_music_ai(req: MusicEditRequest):
 class MetadataRequest(BaseModel):
     script:   str
     audio_id: str = ""   # if provided and transcription is cached, chapters are included
-    model:    str = "llama3.2:3b"
+    model:    Optional[str] = None
 
 
 METADATA_PROMPT = """You are a YouTube SEO expert for a Hill Climb Racing 2 (HCR2) gaming channel.
@@ -3742,7 +3742,7 @@ async def generate_metadata(req: MetadataRequest):
         prompt = METADATA_PROMPT.replace("{script}", req.script)
         async with httpx.AsyncClient(timeout=90.0) as client:
             res = await client.post("http://localhost:11434/api/generate",
-                json={"model": req.model, "prompt": prompt, "stream": False})
+                json={"model": req.model or selected_model, "prompt": prompt, "stream": False})
         raw = res.json().get("response", "").strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start, end = raw.find("{"), raw.rfind("}")
@@ -3780,7 +3780,7 @@ async def generate_metadata(req: MetadataRequest):
 
 class HookRequest(BaseModel):
     topic: str
-    model: str = "llama3.2:3b"
+    model: Optional[str] = None
 
 
 HOOK_PROMPT = """You are a viral YouTube Shorts scriptwriter for Hill Climb Racing 2 gaming content.
@@ -3801,7 +3801,7 @@ async def generate_hooks(req: HookRequest):
         prompt = HOOK_PROMPT.replace("{topic}", req.topic)
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post("http://localhost:11434/api/generate",
-                json={"model": req.model, "prompt": prompt, "stream": False})
+                json={"model": req.model or selected_model, "prompt": prompt, "stream": False})
         raw = res.json().get("response", "").strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start, end = raw.find("["), raw.rfind("]")
@@ -3818,7 +3818,7 @@ async def generate_hooks(req: HookRequest):
 
 class ImagePromptRequest(BaseModel):
     script: str
-    model:  str = "llama3.2:3b"
+    model:  Optional[str] = None
 
 
 IMAGE_PROMPT_SYSTEM = """You write short, vivid scene descriptions for an AI image generator,
@@ -3842,7 +3842,7 @@ async def generate_image_prompt(req: ImagePromptRequest):
         prompt = IMAGE_PROMPT_SYSTEM.replace("{script}", req.script[:1000])
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post("http://localhost:11434/api/generate",
-                json={"model": req.model, "prompt": prompt, "stream": False})
+                json={"model": req.model or selected_model, "prompt": prompt, "stream": False})
         raw = res.json().get("response", "").strip()
         raw = raw.strip('"').strip()
         if not raw:
@@ -3856,7 +3856,7 @@ class IntentRequest(BaseModel):
     message:           str
     has_recent_image:  bool = False
     has_recent_music:  bool = False
-    model:             str = "llama3.2:3b"
+    model:             Optional[str] = None
 
 
 INTENT_PROMPT = """Classify the user's message into exactly one category. Reply ONLY with
@@ -3897,7 +3897,7 @@ async def detect_intent(req: IntentRequest):
         )
         async with httpx.AsyncClient(timeout=20.0) as client:
             res = await client.post("http://localhost:11434/api/generate",
-                json={"model": req.model, "prompt": prompt, "stream": False,
+                json={"model": req.model or selected_model, "prompt": prompt, "stream": False,
                       "options": {"num_predict": 100}})
         raw = res.json().get("response", "").strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
