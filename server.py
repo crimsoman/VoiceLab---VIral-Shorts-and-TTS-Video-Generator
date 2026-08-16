@@ -384,7 +384,24 @@ print("  Open browser: http://localhost:8080")
 print("==========================================\n")
 
 # ── STATE ────────────────────────────────────────────
+# Default model name (used as a last-resort fallback if Ollama isn't
+# reachable at all, or has zero models installed - fresh setup with
+# nothing pulled yet).
 selected_model = "llama3.2:3b"
+
+# If Ollama IS running and already has model(s) installed, prefer one of
+# those instead - covers the very common case of a user who already has
+# Ollama set up with their own models before ever running VoiceLab.
+try:
+    import httpx as _httpx_boot
+    _installed = [m["name"] for m in
+                  _httpx_boot.get("http://localhost:11434/api/tags", timeout=2.0)
+                  .json().get("models", [])]
+    if _installed and selected_model not in _installed:
+        selected_model = _installed[0]
+        print(f"  Ollama model    [OK]  Using installed model: {selected_model}")
+except Exception:
+    pass  # Ollama not running yet - fine, app still starts, Settings tab covers this
 
 
 class TTSRequest(BaseModel):
