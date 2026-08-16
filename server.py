@@ -479,7 +479,8 @@ async def chat_stream(req: ChatRequest):
                     },
                 ) as response:
                     if response.status_code == 404:
-                        yield f"data: {json.dumps({'error': f'Model \"{model_to_use}\" not found in Ollama. Open Settings and pick an installed model.', 'retry': True})}\n\n"
+                        err_msg = f"Model '{model_to_use}' not found in Ollama. Open Settings and pick an installed model."
+                        yield f"data: {json.dumps({'error': err_msg, 'retry': True})}\n\n"
                         return
                     if response.status_code != 200:
                         yield f"data: {json.dumps({'error': f'Ollama error {response.status_code}', 'retry': True})}\n\n"
