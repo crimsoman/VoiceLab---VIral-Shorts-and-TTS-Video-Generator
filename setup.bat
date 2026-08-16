@@ -212,8 +212,8 @@ if %errorlevel% neq 0 (
     color 0B
 ) else (
     echo      Ollama found.
-    ollama list 2>nul | findstr /i "llama3.2" >nul 2>&1
-    if errorlevel 1 (
+    for /f %%n in ('ollama list 2^>nul ^| find /c /v ""') do set OLLAMA_LINE_COUNT=%%n
+    if !OLLAMA_LINE_COUNT! LEQ 1 (
         echo.
         set /p PULL_MODEL="      No AI model downloaded yet. Get a small starter model now, ~2GB (Y/N): "
         if /i "!PULL_MODEL!"=="Y" (
