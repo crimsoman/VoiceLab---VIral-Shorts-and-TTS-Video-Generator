@@ -48,7 +48,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import soundfile as sf
 import numpy as np
-import io, json, httpx, tempfile, sqlite3, os, uuid, psutil, asyncio, subprocess, shutil, re, base64
+import io, json, httpx, tempfile, sqlite3, os, uuid, psutil, asyncio, subprocess, shutil, re, base64, time
 from datetime import datetime
 import librosa
 from scipy import signal
@@ -429,10 +429,13 @@ class TTSRequest(BaseModel):
 class Message(BaseModel):
     role: str
     content: str
+    images: Optional[List[str]] = None  # base64-encoded images, for vision-capable models
 
 class ChatRequest(BaseModel):
     messages: List[Message]
     model: Optional[str] = None
+    think: bool = False          # explicit control - False = fast clean answers by default
+    web_search: bool = False     # + menu web search toggle
 
 class HelperRequest(BaseModel):
     prompt: str
@@ -466,16 +469,60 @@ async def serve_ui():
 async def chat_stream(req: ChatRequest):
     # Use req.model if provided, otherwise fall back to selected_model
     model_to_use = req.model if req.model else selected_model
-    
+
     async def generate():
+        search_used = False
+        messages = [
+            {"role": m.role, "content": m.content, **({"images": m.images} if m.images else {})}
+            for m in req.messages
+        ]
+
+        # ── Web search injection (RAG-style) ──────────────────────
+        # Runs the last user message through Brave Search and prepends
+        # the results as system context, so the model can ground its
+        # answer in current information instead of just its training data.
+        if req.web_search:
+            api_key = _app_settings.get("braveApiKey", "").strip()
+            if not api_key:
+                yield f"data: {json.dumps({'error': 'Web search is on but no Brave Search API key is set - add one in Settings.', 'retry': True})}\n\n"
+                return
+            last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+            if last_user_msg:
+                try:
+                    yield f"data: {json.dumps({'search_status': 'searching'})}\n\n"
+                    results = await brave_web_search(last_user_msg, api_key)
+                    search_used = True
+                    if results:
+                        context = "\n\n".join(
+                            f"[{i+1}] {r['title']}\n{r['snippet']}\nSource: {r['url']}"
+                            for i, r in enumerate(results))
+                        messages.insert(-1 if len(messages) > 1 else 0, {
+                            "role": "system",
+                            "content": ("Current web search results for the user's question. "
+                                        "Use these to inform your answer, and cite sources by "
+                                        f"number like [1] where relevant:\n\n{context}")
+                        })
+                        yield f"data: {json.dumps({'search_status': 'done', 'search_results': results})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'search_status': 'no_results'})}\n\n"
+                except Exception as e:
+                    # Search failing shouldn't kill the whole chat - fall back
+                    # to answering without search context, but tell the user.
+                    yield f"data: {json.dumps({'search_status': 'failed', 'search_error': str(e)})}\n\n"
+
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            gen_start = time.monotonic()
+            async with httpx.AsyncClient(timeout=120.0 if req.think else 60.0) as client:
                 async with client.stream(
                     "POST", "http://localhost:11434/api/chat",
                     json={
                         "model": model_to_use,
-                        "messages": [{"role": m.role, "content": m.content} for m in req.messages],
+                        "messages": messages,
                         "stream": True,
+                        "think": req.think,  # explicit control - was previously unset,
+                                              # which left thinking-capable models (qwen3,
+                                              # deepseek-r1, etc.) free to route everything
+                                              # into "thinking" and leave "content" empty
                     },
                 ) as response:
                     if response.status_code == 404:
@@ -485,18 +532,27 @@ async def chat_stream(req: ChatRequest):
                     if response.status_code != 200:
                         yield f"data: {json.dumps({'error': f'Ollama error {response.status_code}', 'retry': True})}\n\n"
                         return
-                    
+
+                    eval_count = 0
+                    eval_duration_ns = 0
                     async for line in response.aiter_lines():
                         if not line.strip():
                             continue
                         try:
                             data = json.loads(line)
-                            token = data.get("message", {}).get("content", "")
+                            msg = data.get("message", {})
+                            content_tok = msg.get("content", "")
+                            thinking_tok = msg.get("thinking", "")
                             done = data.get("done", False)
-                            if token:
-                                yield f"data: {json.dumps({'token': token})}\n\n"
+                            if thinking_tok:
+                                yield f"data: {json.dumps({'thinking_token': thinking_tok})}\n\n"
+                            if content_tok:
+                                yield f"data: {json.dumps({'token': content_tok})}\n\n"
                             if done:
-                                yield f"data: {json.dumps({'done': True})}\n\n"
+                                eval_count = data.get("eval_count", 0)
+                                eval_duration_ns = data.get("eval_duration", 0)
+                                tok_per_sec = round(eval_count / (eval_duration_ns / 1e9), 1) if eval_duration_ns else 0
+                                yield f"data: {json.dumps({'done': True, 'stats': {'model': model_to_use, 'tokens': eval_count, 'tokens_per_sec': tok_per_sec, 'elapsed_sec': round(time.monotonic() - gen_start, 1), 'search_used': search_used, 'thinking_used': req.think}})}\n\n"
                                 return
                         except:
                             continue
@@ -795,6 +851,39 @@ async def get_settings():
     return {"settings": _app_settings}
 
 
+@app.get("/internet-status")
+async def internet_status():
+    """Real connectivity check, not just navigator.onLine (which only checks
+    the network adapter, not actual internet reachability - e.g. connected
+    to WiFi with no internet still reports 'online' to the browser)."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.head("https://www.google.com")
+            return {"online": r.status_code < 500}
+    except Exception:
+        return {"online": False}
+
+
+async def brave_web_search(query: str, api_key: str, count: int = 5) -> list:
+    """Search the web via Brave Search API. Returns a list of
+    {title, url, snippet} dicts, or raises on failure - caller decides
+    how to surface that to the user."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "count": count},
+            headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+        )
+    if resp.status_code == 401:
+        raise RuntimeError("Brave Search API key is invalid or missing - check Settings.")
+    if resp.status_code == 429:
+        raise RuntimeError("Brave Search free tier limit reached for this month.")
+    resp.raise_for_status()
+    results = resp.json().get("web", {}).get("results", [])[:count]
+    return [{"title": r.get("title", ""), "url": r.get("url", ""),
+              "snippet": r.get("description", "")} for r in results]
+
+
 @app.post("/save-settings")
 async def save_settings(req: SettingsPayload):
     global _app_settings
@@ -805,6 +894,73 @@ async def save_settings(req: SettingsPayload):
         return {"status": "ok"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── EXPORT DESTINATION ──────────────────────────────────────────────
+# Since the frontend is a browser page, it can't silently pick or
+# remember an OS folder itself (browser sandboxing). server.py runs
+# locally on the same PC though, so it copies the finished file to a
+# real chosen folder directly - default (from Settings) or a one-off
+# custom path - instead of relying on the browser's own download flow.
+#
+# Each export type actually lives in its own dedicated directory (not
+# one shared folder). NOTE: this lookup is built INSIDE the function
+# below, not at module level - THUMBS_DIR isn't defined until much
+# later in this file, so referencing it in a module-level dict here
+# would crash the server at import time with NameError.
+
+
+class SaveExportRequest(BaseModel):
+    export_type: str        # video / audio / thumbnail / music
+    source_filename: str    # filename inside that type's own directory
+    custom_path: Optional[str] = None  # if set, use this instead of the saved default
+    save_as_default: bool = False      # if true, also remember custom_path as the default for this type
+
+
+@app.post("/save-export")
+async def save_export(req: SaveExportRequest):
+    export_source_dirs = {
+        "video": VIDEOS_DIR,
+        "audio": EXPORTS_DIR,       # TTS/voiceover output lives here
+        "thumbnail": THUMBS_DIR,
+        "music": MUSIC_DIR,
+    }
+    if req.export_type not in export_source_dirs:
+        return JSONResponse(status_code=400, content={"error": f"Unknown export type '{req.export_type}'"})
+
+    source_path = os.path.join(export_source_dirs[req.export_type], req.source_filename)
+    if not os.path.isfile(source_path):
+        return JSONResponse(status_code=404, content={"error": "Source file not found - it may have been cleared already."})
+
+    export_paths = _app_settings.get("exportPaths", {})
+    dest_folder = (req.custom_path or export_paths.get(req.export_type) or "").strip()
+
+    if not dest_folder:
+        # No default set anywhere and no custom path given this time -
+        # tell the frontend to prompt the user instead of silently failing.
+        return {"status": "needs_path", "export_type": req.export_type}
+
+    try:
+        os.makedirs(dest_folder, exist_ok=True)
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"Can't create/access that folder: {e}"})
+
+    dest_path = os.path.join(dest_folder, req.source_filename)
+    try:
+        shutil.copy2(source_path, dest_path)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Copy failed: {e}"})
+
+    if req.save_as_default and req.custom_path:
+        export_paths[req.export_type] = req.custom_path
+        _app_settings["exportPaths"] = export_paths
+        try:
+            with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(_app_settings, f, indent=2)
+        except Exception:
+            pass  # save succeeded either way, just the "remember" part failed silently
+
+    return {"status": "ok", "saved_to": dest_path}
 
 
 # ── RECENT AUDIO ──────────────────────────────────────────────────
