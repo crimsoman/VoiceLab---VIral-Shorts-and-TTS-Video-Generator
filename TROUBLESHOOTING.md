@@ -82,6 +82,25 @@ Something else on your PC is using port 8080.
 
 ---
 
+### Thinking mode reasons but never gives a final answer
+
+This is a real limitation of reasoning models (Qwen3, DeepSeek-R1, Gemma
+with thinking, etc.) under a small context window - they can spend their
+entire token budget "thinking" and never reach the actual answer. Two
+places control this, and **both may need raising**:
+
+1. **VoiceLab's own setting**: Settings → Thinking Mode Context Size
+   (default 16k) - raise this slider if you have RAM to spare.
+2. **Ollama's own app setting**: open the Ollama app itself → Settings →
+   Context length. This can act as an independent ceiling on top of
+   VoiceLab's setting - confirmed by testing that raising it to 32k
+   (Ollama's own slider) fixed responses that were failing even with
+   VoiceLab's setting already raised.
+
+If you don't have RAM to spare for a larger context, turn Thinking mode
+off in the chat's + menu instead - it isn't required for the model to
+answer, just for it to show its reasoning first.
+
 ### GPU not detected, but I have an NVIDIA GPU
 
 - Setup detects your GPU using the `nvidia-smi` command, which comes with
