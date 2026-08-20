@@ -58,3 +58,26 @@ git push -u origin main
 
 You'd create the empty repo on GitHub's website first (green **New**
 button on your GitHub homepage) before running the last two lines.
+
+## Adding your README screenshots
+
+The README references 4 screenshots (`images/chat.png`,
+`images/tts-studio.png`, `images/video-studio.png`,
+`images/clip-finder.png`) that don't exist yet — you need to add them:
+
+1. Run VoiceLab and take a clean screenshot of each of the 4 tabs
+   (Chat, TTS Studio, Video Studio, Clip Finder). A normal-width desktop
+   window works best — not maximized ultra-wide, so the screenshot isn't
+   mostly empty space.
+2. Rename them exactly: `chat.png`, `tts-studio.png`, `video-studio.png`,
+   `clip-finder.png`.
+3. On your repo's GitHub page, click **Add file → Create new file**,
+   type `images/chat.png` as the filename (the `images/` prefix creates
+   the folder automatically) — but since this is an image, use
+   **Add file → Upload files** instead, and just drag all 4 images in at
+   once. GitHub will put them wherever you dropped them; if you drag them
+   in from the repo's root page, they'll land in the root instead of
+   `images/` — click into a folder first, or create `images/` via the
+   "Create new file" trick above, then upload into that folder specifically.
+4. Commit. The README will start showing them automatically — refresh
+   the repo's main page to check.
