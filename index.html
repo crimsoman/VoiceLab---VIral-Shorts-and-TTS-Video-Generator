@@ -3925,10 +3925,36 @@ function toggleConvMenu(convId, anchorEl){
     <div class="citem-menu-item" onclick="togglePinConv('${convId}')">${conv&&conv.pinned?'📌 Unpin':'📌 Pin'}</div>
     <div class="citem-menu-item" onclick="exportConvAsText('${convId}')">⬇️ Export as text</div>
     <div class="citem-menu-item danger" onclick="deleteConv('${convId}')">🗑️ Delete</div>`;
+  // Render off-screen first so we can measure its real size before placing
+  // it - a one-shot pre-render position guess can end up wrong depending on
+  // content size/viewport edge cases; measuring after render and clamping
+  // to the viewport is the robust way to guarantee it stays anchored.
+  menu.style.visibility='hidden';
+  menu.style.top='0px';
+  menu.style.left='0px';
   document.body.appendChild(menu);
-  const rect=anchorEl.getBoundingClientRect();
-  menu.style.top=(rect.bottom+4)+'px';
-  menu.style.left=Math.max(8, rect.right-160)+'px';
+
+  requestAnimationFrame(()=>{
+    const rect=anchorEl.getBoundingClientRect();
+    const menuRect=menu.getBoundingClientRect();
+    const vw=window.innerWidth, vh=window.innerHeight;
+
+    let top = rect.bottom + 4;
+    let left = rect.right - menuRect.width;
+
+    // Flip above the anchor if there isn't room below
+    if(top + menuRect.height > vh - 8){
+      top = rect.top - menuRect.height - 4;
+    }
+    // Clamp horizontally so it never renders off either edge
+    left = Math.min(Math.max(8, left), vw - menuRect.width - 8);
+    top = Math.max(8, top);
+
+    menu.style.top = top + 'px';
+    menu.style.left = left + 'px';
+    menu.style.visibility='visible';
+  });
+
   setTimeout(()=>document.addEventListener('click', closeConvMenu, true), 0);
 }
 
