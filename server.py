@@ -522,13 +522,16 @@ async def chat_stream(req: ChatRequest):
                                               # into "thinking" and leave "content" empty
                         "options": {
                             # Reasoning consumes significant token budget before any
-                            # final answer even starts. Without this, Ollama's default
-                            # context window (often 2048-4096) can run out mid-thought
-                            # on a long conversation, silently leaving content empty -
-                            # this is the most likely cause of the "stuck thinking,
-                            # blank answer" bug. 8192 is generous without being wasteful
-                            # for local hardware.
-                            "num_ctx": 8192 if req.think else 4096,
+                            # final answer even starts - verbose models (gemma4:12b,
+                            # qwen3.5, etc.) can burn through thousands of tokens of
+                            # chain-of-thought before ever reaching a final answer.
+                            # Configurable in Settings since the right value genuinely
+                            # depends on the user's RAM/model - no single default fits
+                            # everyone. NOTE: if Ollama's own app has its own context
+                            # length setting, that may still act as an additional
+                            # ceiling independent of this per-request value.
+                            "num_ctx": _app_settings.get("thinkContextSize", 16384) if req.think
+                                       else _app_settings.get("normalContextSize", 4096),
                         },
                     },
                 ) as response:
