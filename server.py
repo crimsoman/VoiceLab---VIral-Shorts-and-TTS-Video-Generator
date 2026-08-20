@@ -436,6 +436,7 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     think: bool = False          # explicit control - False = fast clean answers by default
     web_search: bool = False     # + menu web search toggle
+    search_provider: str = "auto"  # 'auto', 'brave', 'tavily', or 'duckduckgo'
 
 class HelperRequest(BaseModel):
     prompt: str
@@ -482,15 +483,11 @@ async def chat_stream(req: ChatRequest):
         # the results as system context, so the model can ground its
         # answer in current information instead of just its training data.
         if req.web_search:
-            api_key = _app_settings.get("braveApiKey", "").strip()
-            if not api_key:
-                yield f"data: {json.dumps({'error': 'Web search is on but no Brave Search API key is set - add one in Settings.', 'retry': True})}\n\n"
-                return
             last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
             if last_user_msg:
                 try:
-                    yield f"data: {json.dumps({'search_status': 'searching'})}\n\n"
-                    results = await brave_web_search(last_user_msg, api_key)
+                    yield f"data: {json.dumps({'search_status': 'searching', 'search_provider': req.search_provider})}\n\n"
+                    results, provider_used = await web_search_dispatch(last_user_msg, req.search_provider, _app_settings)
                     search_used = True
                     if results:
                         context = "\n\n".join(
@@ -502,7 +499,7 @@ async def chat_stream(req: ChatRequest):
                                         "Use these to inform your answer, and cite sources by "
                                         f"number like [1] where relevant:\n\n{context}")
                         })
-                        yield f"data: {json.dumps({'search_status': 'done', 'search_results': results})}\n\n"
+                        yield f"data: {json.dumps({'search_status': 'done', 'search_results': results, 'search_provider_used': provider_used})}\n\n"
                     else:
                         yield f"data: {json.dumps({'search_status': 'no_results'})}\n\n"
                 except Exception as e:
@@ -523,6 +520,16 @@ async def chat_stream(req: ChatRequest):
                                               # which left thinking-capable models (qwen3,
                                               # deepseek-r1, etc.) free to route everything
                                               # into "thinking" and leave "content" empty
+                        "options": {
+                            # Reasoning consumes significant token budget before any
+                            # final answer even starts. Without this, Ollama's default
+                            # context window (often 2048-4096) can run out mid-thought
+                            # on a long conversation, silently leaving content empty -
+                            # this is the most likely cause of the "stuck thinking,
+                            # blank answer" bug. 8192 is generous without being wasteful
+                            # for local hardware.
+                            "num_ctx": 8192 if req.think else 4096,
+                        },
                     },
                 ) as response:
                     if response.status_code == 404:
@@ -552,7 +559,7 @@ async def chat_stream(req: ChatRequest):
                                 eval_count = data.get("eval_count", 0)
                                 eval_duration_ns = data.get("eval_duration", 0)
                                 tok_per_sec = round(eval_count / (eval_duration_ns / 1e9), 1) if eval_duration_ns else 0
-                                yield f"data: {json.dumps({'done': True, 'stats': {'model': model_to_use, 'tokens': eval_count, 'tokens_per_sec': tok_per_sec, 'elapsed_sec': round(time.monotonic() - gen_start, 1), 'search_used': search_used, 'thinking_used': req.think}})}\n\n"
+                                yield f"data: {json.dumps({'done': True, 'stats': {'model': model_to_use, 'tokens': eval_count, 'tokens_per_sec': tok_per_sec, 'elapsed_sec': round(time.monotonic() - gen_start, 1), 'search_used': search_used, 'thinking_used': req.think, 'done_reason': data.get('done_reason', 'stop')}})}\n\n"
                                 return
                         except:
                             continue
@@ -851,6 +858,17 @@ async def get_settings():
     return {"settings": _app_settings}
 
 
+@app.get("/search-providers")
+async def search_providers():
+    """Which search providers are actually usable right now, for the +
+    menu to render (grayed out vs available) without guessing client-side."""
+    return {
+        "brave": bool((_app_settings.get("braveApiKey") or "").strip()),
+        "tavily": bool((_app_settings.get("tavilyApiKey") or "").strip()),
+        "duckduckgo": True,  # always available, no key needed
+    }
+
+
 @app.get("/internet-status")
 async def internet_status():
     """Real connectivity check, not just navigator.onLine (which only checks
@@ -882,6 +900,95 @@ async def brave_web_search(query: str, api_key: str, count: int = 5) -> list:
     results = resp.json().get("web", {}).get("results", [])[:count]
     return [{"title": r.get("title", ""), "url": r.get("url", ""),
               "snippet": r.get("description", "")} for r in results]
+
+
+async def tavily_web_search(query: str, api_key: str, count: int = 5) -> list:
+    """Search via Tavily - purpose-built for feeding LLM context, so
+    results tend to be cleaner/more summary-like than raw search snippets."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            "https://api.tavily.com/search",
+            json={"api_key": api_key, "query": query, "max_results": count},
+        )
+    if resp.status_code == 401:
+        raise RuntimeError("Tavily API key is invalid or missing - check Settings.")
+    if resp.status_code == 429:
+        raise RuntimeError("Tavily free tier limit reached for this month.")
+    resp.raise_for_status()
+    results = resp.json().get("results", [])[:count]
+    return [{"title": r.get("title", ""), "url": r.get("url", ""),
+              "snippet": (r.get("content", "") or "")[:400]} for r in results]
+
+
+async def duckduckgo_web_search(query: str, count: int = 5) -> list:
+    """DuckDuckGo's official Instant Answer API - free, no key needed at all,
+    always available as a last-resort fallback. IMPORTANT LIMITATION: this
+    is NOT a general web search API - it mostly returns a single Wikipedia-
+    style abstract plus "related topics" links, not a real ranked list of
+    web results. It works reasonably for factual/definitional questions
+    ("what is X", "who is Y") and poorly for anything else. Brave/Tavily
+    give meaningfully better grounding when a key is available."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    results = []
+    if data.get("AbstractText"):
+        results.append({"title": data.get("Heading", query),
+                          "url": data.get("AbstractURL", ""),
+                          "snippet": data["AbstractText"]})
+    for topic in data.get("RelatedTopics", []):
+        if len(results) >= count:
+            break
+        if isinstance(topic, dict) and topic.get("Text"):
+            results.append({"title": topic.get("Text", "")[:80],
+                              "url": topic.get("FirstURL", ""),
+                              "snippet": topic.get("Text", "")})
+    return results[:count]
+
+
+async def web_search_dispatch(query: str, provider: str, settings: dict, count: int = 5) -> tuple:
+    """Unified search entry point. provider is 'auto' (try Brave, then
+    Tavily, then DuckDuckGo, in that priority order, skipping any without
+    a configured key) or an explicit provider name (use only that one,
+    raise clearly if it fails - no silent fallback when the user picked
+    a specific provider on purpose). Returns (results, provider_actually_used)."""
+    brave_key = (settings.get("braveApiKey") or "").strip()
+    tavily_key = (settings.get("tavilyApiKey") or "").strip()
+
+    providers = []
+    if provider == "auto":
+        if brave_key: providers.append(("brave", lambda: brave_web_search(query, brave_key, count)))
+        if tavily_key: providers.append(("tavily", lambda: tavily_web_search(query, tavily_key, count)))
+        providers.append(("duckduckgo", lambda: duckduckgo_web_search(query, count)))  # always available, last resort
+    elif provider == "brave":
+        if not brave_key:
+            raise RuntimeError("Brave Search selected but no API key is set - add one in Settings.")
+        providers = [("brave", lambda: brave_web_search(query, brave_key, count))]
+    elif provider == "tavily":
+        if not tavily_key:
+            raise RuntimeError("Tavily selected but no API key is set - add one in Settings.")
+        providers = [("tavily", lambda: tavily_web_search(query, tavily_key, count))]
+    elif provider == "duckduckgo":
+        providers = [("duckduckgo", lambda: duckduckgo_web_search(query, count))]
+    else:
+        raise RuntimeError(f"Unknown search provider '{provider}'.")
+
+    last_error = None
+    for name, fn in providers:
+        try:
+            results = await fn()
+            if results:
+                return results, name
+            last_error = f"{name} returned no results"
+        except Exception as e:
+            last_error = f"{name}: {e}"
+            continue  # auto mode falls through to the next provider; single-provider mode just has one to try
+
+    raise RuntimeError(last_error or "All search providers failed or returned nothing.")
 
 
 @app.post("/save-settings")
