@@ -221,6 +221,14 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .plus-toggle.on::after{transform:translateX(14px)}
 .plus-item-note{font-size:10px;color:var(--text3);padding:4px 10px 2px}
 .attach-chip{display:inline-flex;align-items:center;font-size:11px;color:var(--text2);background:var(--bg4);border:1px solid var(--border);border-radius:8px;padding:4px 10px;margin:6px 0}
+
+/* Conversation item hover menu */
+.citem-menu{position:fixed;background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  padding:4px;min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:100}
+.citem-menu-item{padding:7px 10px;border-radius:5px;cursor:pointer;font-size:12.5px;color:var(--text2)}
+.citem-menu-item:hover{background:var(--bg4)}
+.citem-menu-item.danger{color:#e5686b}
+.citem-menu-item.danger:hover{background:rgba(229,104,107,.1)}
 .mact{background:transparent;border:1px solid var(--border2);color:var(--text3);padding:3px 10px;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s}
 .mact:hover{border-color:var(--acc);color:var(--acc)}
 .mact.tts:hover{border-color:var(--green);color:var(--green)}
@@ -381,7 +389,15 @@ audio{width:100%;border-radius:6px}
         New Chat
       </button>
     </div>
-    <div class="sb-label">Conversations</div>
+    <div class="sb-label" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Conversations</span>
+      <span onclick="clearAllConvs()" title="Delete all conversations" style="cursor:pointer;font-size:11px;color:var(--text3)">Clear all</span>
+    </div>
+    <div style="padding:0 12px 8px">
+      <input type="text" id="conv-search" placeholder="Search conversations..." oninput="renderSidebar()"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);
+               border-radius:6px;padding:6px 9px;font-size:11.5px;font-family:inherit;box-sizing:border-box">
+    </div>
     <div class="conv-list" id="clist"></div>
     <div class="sb-foot">
       <div class="model-badge">Model <span id="model-name">...</span></div>
@@ -450,6 +466,16 @@ audio{width:100%;border-radius:6px}
                 <span class="plus-toggle" id="plus-search-toggle"></span>
               </div>
               <div class="plus-item-note" id="plus-search-note" style="display:none"></div>
+              <div id="plus-provider-row" style="display:none;padding:2px 10px 6px;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
+                <select id="plus-provider-select" onchange="setPlusProvider(this.value)"
+                  style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text2);
+                         border-radius:6px;padding:5px 7px;font-size:11px;font-family:inherit">
+                  <option value="auto">Auto (try Brave → Tavily → DuckDuckGo)</option>
+                  <option value="brave">Brave only</option>
+                  <option value="tavily">Tavily only</option>
+                  <option value="duckduckgo">DuckDuckGo only</option>
+                </select>
+              </div>
               <div class="plus-item" onclick="document.getElementById('plus-file-input').click()">
                 <span class="pi-icon">📎</span>
                 <span class="pi-label">Attach file (image/text)</span>
@@ -1911,6 +1937,8 @@ let curId = null;
 let curMsgs = [];
 let streaming = false;
 let chatWebSearchOn = false;
+let chatSearchProvider = localStorage.getItem('vl_search_provider') || 'auto';
+let searchProviderAvailability = {brave:false, tavily:false, duckduckgo:true};
 let internetOnline = true;   // updated by pollInternetStatus()
 let thinkModeByModel = JSON.parse(localStorage.getItem('vl_think_by_model') || '{}');
 
@@ -1976,6 +2004,7 @@ window.addEventListener('DOMContentLoaded',async ()=>{
   setInterval(pollOllama, 12000);
   setInterval(pollMemory, 15000);
   pollInternetStatus();
+  refreshSearchProviderAvailability();
   setInterval(pollInternetStatus, 20000);
   if(convs.length) loadConv(convs[0].id);
 });
@@ -2007,10 +2036,10 @@ function switchTab(t){
   const modelSel = document.getElementById('model-select');
   if(modelSel) modelSel.style.display = (t==='chat') ? 'none' : 'inline-block';
 
-  // Chat history sidebar is only relevant where a chat→TTS workflow exists
-  // (Chat, TTS Studio). Clip Finder and Video Studio are self-contained
-  // pipelines with no chat feature touching them — was pure clutter there.
-  const showSidebar = (t==='chat' || t==='tts');
+  // Chat history sidebar belongs to the Chat tab only. It's the history
+  // of chat conversations specifically - showing it on TTS Studio too
+  // was pure duplication with nothing TTS-specific to manage there.
+  const showSidebar = (t==='chat');
   const sidebarEl = document.querySelector('.sidebar');
   const splitterEl = document.getElementById('splitter-sidebar');
   if(sidebarEl) sidebarEl.style.display = showSidebar ? 'flex' : 'none';
@@ -3829,18 +3858,124 @@ function toggleTheme(){
 function renderSidebar(){
   const el=document.getElementById('clist');
   el.innerHTML='';
+
+  const searchBox=document.getElementById('conv-search');
+  const query=(searchBox?searchBox.value:'').trim().toLowerCase();
+
+  let list=convs.filter(c=>!query || (c.title||'').toLowerCase().includes(query));
+  // Pinned conversations first, then by original (most-recent-first) order
+  list=[...list].sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0));
+
   if(!convs.length){
     el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:8px 12px">No conversations yet</div>';
     return;
   }
-  convs.forEach(c=>{
+  if(!list.length){
+    el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:8px 12px">No matches</div>';
+    return;
+  }
+
+  list.forEach(c=>{
     const d=document.createElement('div');
     d.className='citem'+(c.id===curId?' on':'');
-    d.textContent=c.title||'New Chat';
-    d.title=c.title||'New Chat';
-    d.onclick=()=>loadConv(c.id);
+    d.style.cssText='position:relative;display:flex;align-items:center;gap:6px';
+    d.onclick=(e)=>{ if(!e.target.closest('.citem-menu-btn') && !e.target.closest('.citem-menu')) loadConv(c.id); };
+
+    const titleSpan=document.createElement('span');
+    titleSpan.style.cssText='flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    titleSpan.textContent=(c.pinned?'📌 ':'')+(c.title||'New Chat');
+    titleSpan.title=c.title||'New Chat';
+    d.appendChild(titleSpan);
+
+    const menuBtn=document.createElement('span');
+    menuBtn.className='citem-menu-btn';
+    menuBtn.textContent='⋯';
+    menuBtn.style.cssText='opacity:0;padding:2px 6px;cursor:pointer;border-radius:4px;font-size:14px;color:var(--text3)';
+    menuBtn.onmouseenter=()=>menuBtn.style.background='var(--bg4)';
+    menuBtn.onmouseleave=()=>menuBtn.style.background='transparent';
+    d.onmouseenter=()=>menuBtn.style.opacity='1';
+    d.onmouseleave=()=>{ menuBtn.style.opacity='0'; closeConvMenu(); };
+    menuBtn.onclick=(e)=>{ e.stopPropagation(); toggleConvMenu(c.id, menuBtn); };
+    d.appendChild(menuBtn);
+
     el.appendChild(d);
   });
+}
+
+let _openConvMenuId=null;
+function closeConvMenu(){
+  const existing=document.getElementById('citem-menu-popup');
+  if(existing) existing.remove();
+  _openConvMenuId=null;
+  document.removeEventListener('click', closeConvMenu, true);
+}
+function toggleConvMenu(convId, anchorEl){
+  if(_openConvMenuId===convId){ closeConvMenu(); return; }
+  closeConvMenu();
+  _openConvMenuId=convId;
+  const menu=document.createElement('div');
+  menu.id='citem-menu-popup';
+  menu.className='citem-menu';
+  const conv=convs.find(c=>c.id===convId);
+  menu.innerHTML=`
+    <div class="citem-menu-item" onclick="renameConv('${convId}')">✏️ Rename</div>
+    <div class="citem-menu-item" onclick="togglePinConv('${convId}')">${conv&&conv.pinned?'📌 Unpin':'📌 Pin'}</div>
+    <div class="citem-menu-item" onclick="exportConvAsText('${convId}')">⬇️ Export as text</div>
+    <div class="citem-menu-item danger" onclick="deleteConv('${convId}')">🗑️ Delete</div>`;
+  document.body.appendChild(menu);
+  const rect=anchorEl.getBoundingClientRect();
+  menu.style.top=(rect.bottom+4)+'px';
+  menu.style.left=Math.max(8, rect.right-160)+'px';
+  setTimeout(()=>document.addEventListener('click', closeConvMenu, true), 0);
+}
+
+function renameConv(convId){
+  const conv=convs.find(c=>c.id===convId);
+  if(!conv) return;
+  const newTitle=prompt('Rename conversation:', conv.title||'New Chat');
+  closeConvMenu();
+  if(newTitle && newTitle.trim()){
+    conv.title=newTitle.trim().slice(0,60);
+    saveConvs();
+    renderSidebar();
+  }
+}
+function togglePinConv(convId){
+  const conv=convs.find(c=>c.id===convId);
+  if(!conv) return;
+  conv.pinned=!conv.pinned;
+  closeConvMenu();
+  saveConvs();
+  renderSidebar();
+}
+function deleteConv(convId){
+  closeConvMenu();
+  if(!confirm('Delete this conversation? This can\'t be undone.')) return;
+  convs=convs.filter(c=>c.id!==convId);
+  saveConvs();
+  if(curId===convId){ curId=null; curMsgs=[]; document.getElementById('msgs').innerHTML=''; }
+  renderSidebar();
+}
+function clearAllConvs(){
+  if(!convs.length) return;
+  if(!confirm(`Delete all ${convs.length} conversation(s)? This can't be undone.`)) return;
+  convs=[];
+  curId=null; curMsgs=[];
+  document.getElementById('msgs').innerHTML='';
+  saveConvs();
+  renderSidebar();
+}
+function exportConvAsText(convId){
+  const conv=convs.find(c=>c.id===convId);
+  closeConvMenu();
+  if(!conv) return;
+  const lines=(conv.messages||[]).map(m=>`${m.role==='user'?'You':'AI'}: ${m.content}`);
+  const blob=new Blob([lines.join('\n\n')], {type:'text/plain'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=(conv.title||'conversation').replace(/[^\w\- ]/g,'').slice(0,50)+'.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function saveConvs(){localStorage.setItem('vl-convs',JSON.stringify(convs.slice(0,50)));}
@@ -3944,7 +4079,8 @@ function togglePlusMenu(e){
   const menu=document.getElementById('plus-menu');
   const opening=!menu.classList.contains('open');
   if(opening){
-    renderPlusMenuState();
+    refreshSearchProviderAvailability().then(renderPlusMenuState);
+    renderPlusMenuState();  // render immediately with cached state, then again once fresh data arrives
     menu.classList.add('open');
     setTimeout(()=>document.addEventListener('click', _plusMenuOutsideClick, true), 0);
   }else{
@@ -3957,26 +4093,55 @@ function renderPlusMenuState(){
   const thinkOn=getThinkMode();
   document.getElementById('plus-think-toggle').classList.toggle('on', thinkOn);
 
-  // Web search toggle - grayed out if offline or no API key configured
+  // Web search toggle - DuckDuckGo needs no key at all, so search is only
+  // ever fully disabled when offline. Missing Brave/Tavily keys just limits
+  // which providers are selectable, handled in the provider dropdown below.
   const searchItem=document.getElementById('plus-search-item');
   const searchNote=document.getElementById('plus-search-note');
-  const hasKey=!!(_appSettings.braveApiKey||'').trim();
+  const providerRow=document.getElementById('plus-provider-row');
+  const providerSelect=document.getElementById('plus-provider-select');
   document.getElementById('plus-search-toggle').classList.toggle('on', chatWebSearchOn);
+
   if(!internetOnline){
     searchItem.classList.add('disabled');
     searchNote.style.display='block';
     searchNote.textContent='⚠ You appear to be offline';
-  }else if(!hasKey){
-    searchItem.classList.add('disabled');
-    searchNote.style.display='block';
-    searchNote.textContent='⚠ Add a free Brave Search API key in Settings first';
+    providerRow.style.display='none';
   }else{
     searchItem.classList.remove('disabled');
     searchNote.style.display='none';
+
+    if(chatWebSearchOn){
+      providerRow.style.display='block';
+      // Gray out (but still show, for discoverability) providers with no key set
+      [...providerSelect.options].forEach(opt=>{
+        const key=opt.value;
+        const available = key==='auto' || key==='duckduckgo' || searchProviderAvailability[key];
+        opt.disabled = !available;
+        opt.textContent = opt.textContent.replace(' (needs API key)','') + (available?'':' (needs API key)');
+      });
+      providerSelect.value=chatSearchProvider;
+    }else{
+      providerRow.style.display='none';
+    }
   }
 
   // Model label
   document.getElementById('plus-model-label').textContent=(selected_model||'none').replace(':latest','');
+}
+
+function setPlusProvider(value){
+  chatSearchProvider=value;
+  localStorage.setItem('vl_search_provider', value);
+}
+
+async function refreshSearchProviderAvailability(){
+  try{
+    const r=await fetch('/search-providers');
+    searchProviderAvailability=await r.json();
+  }catch{
+    searchProviderAvailability={brave:false, tavily:false, duckduckgo:true};
+  }
 }
 
 function togglePlusThinking(e){
@@ -4115,7 +4280,7 @@ async function send(){
     const res=await fetch('/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:curMsgs, think:getThinkMode(), web_search:chatWebSearchOn})
+      body:JSON.stringify({messages:curMsgs, think:getThinkMode(), web_search:chatWebSearchOn, search_provider:chatSearchProvider})
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
 
@@ -4127,6 +4292,7 @@ async function send(){
     const {textEl,actsEl,bubble,thinkEl,statsEl}=addBubble('ai','',true,null);
     let thinkTxt='';
     let searchResults=null;
+    let searchProviderUsed=null;
 
     while(true){
       const {done,value}=await reader.read();
@@ -4148,6 +4314,7 @@ async function send(){
               textEl.innerHTML='<div class="search-status">🔍 Searching the web...</div>';
             }else if(d.search_status==='done'){
               searchResults=d.search_results;
+              searchProviderUsed=d.search_provider_used;
               textEl.innerHTML='';
             }else if(d.search_status==='no_results'){
               textEl.innerHTML='<div class="search-status">🔍 No web results found — answering from the model alone.</div>';
@@ -4176,11 +4343,33 @@ async function send(){
             m.scrollTop=m.scrollHeight;
           }
           if(d.done){
+            // Always finalize the thinking panel - previously this only
+            // happened inside the d.token handler, so if content stayed
+            // empty (a real possibility with reasoning models running out
+            // of context budget mid-thought), the spinner stayed stuck
+            // "Thinking..." forever with a permanently blank answer below it.
+            if(thinkTxt){
+              thinkEl.classList.remove('open');
+              const spinnerEl=thinkEl.querySelector('.think-spinner');
+              const labelEl=thinkEl.querySelector('.think-label');
+              if(spinnerEl) spinnerEl.textContent='✅';
+              if(labelEl) labelEl.textContent='Reasoning (click to expand)';
+            }
+            if(!aiTxt.trim()){
+              const reason=d.stats?.done_reason;
+              const reasonNote = reason==='length'
+                ? ' (it ran out of context space while reasoning — try turning Thinking mode off, or asking a shorter question).'
+                : reason && reason!=='stop' ? ` (reason: ${reason}).` : '.';
+              textEl.innerHTML = thinkTxt
+                ? `<div class="search-status">⚠️ The model reasoned but didn't produce a final answer${reasonNote} See its reasoning above.</div>`
+                : `<div class="search-status">⚠️ No response generated${reasonNote}</div>`;
+            }
             actsEl.style.display='flex';
             addSuggestionChips(bubble);
             if(searchResults && searchResults.length){
               const cites=searchResults.map((r,i)=>`<a href="${r.url}" target="_blank" rel="noopener" class="cite-chip">[${i+1}] ${r.title.slice(0,40)}</a>`).join(' ');
-              textEl.innerHTML+=`<div class="cite-row">${cites}</div>`;
+              const providerLabel={brave:'Brave',tavily:'Tavily',duckduckgo:'DuckDuckGo'}[searchProviderUsed]||searchProviderUsed||'';
+              textEl.innerHTML+=`<div class="cite-row">${cites}</div><div style="font-size:10px;color:var(--text3);margin-top:4px">via ${providerLabel}</div>`;
             }
             if(d.stats){
               const s=d.stats;
@@ -4195,7 +4384,8 @@ async function send(){
                   Speed: ${s.tokens_per_sec} tokens/sec<br>
                   Total time: ${s.elapsed_sec}s<br>
                   Web search used: ${s.search_used?'Yes':'No'}<br>
-                  Thinking mode: ${s.thinking_used?'On':'Off'}
+                  Thinking mode: ${s.thinking_used?'On':'Off'}<br>
+                  Stopped because: ${s.done_reason||'stop'}
                 </div>`;
             }
           }
@@ -4316,6 +4506,10 @@ async function loadSettings(){
   if(_appSettings.braveApiKey){
     const el = document.getElementById('s-brave-key');
     if(el) el.value = _appSettings.braveApiKey;
+  }
+  if(_appSettings.tavilyApiKey){
+    const el = document.getElementById('s-tavily-key');
+    if(el) el.value = _appSettings.tavilyApiKey;
   }
   const exportPaths = _appSettings.exportPaths || {};
   const exportPathIds = {video:'s-export-video', audio:'s-export-audio', thumbnail:'s-export-thumbnail', music:'s-export-music'};
@@ -7815,12 +8009,26 @@ async function switchModelTo(modelName){
   <div class="settings-section">
     <div class="settings-label">🔍 Web Search (Chat + menu)</div>
     <div style="font-size:10.5px;color:var(--text3);margin-bottom:8px">
-      Free at <a href="https://api-dashboard.search.brave.com" target="_blank" rel="noopener" style="color:var(--acc)">api-dashboard.search.brave.com</a> — 2,000 queries/month, no credit card.
+      Add any/all of these — the + menu's "Auto" mode tries them in order (Brave → Tavily → DuckDuckGo), or pick one manually.
     </div>
+
+    <div style="font-size:11px;margin-bottom:3px">Brave Search <span style="color:var(--text3);font-weight:400">— 2,000 free/mo, best general results</span></div>
+    <a href="https://api-dashboard.search.brave.com" target="_blank" rel="noopener" style="font-size:10px;color:var(--acc)">Get a free key →</a>
     <input type="password" id="s-brave-key" placeholder="Brave Search API key"
       onchange="saveSetting('braveApiKey',this.value)"
       style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);
-             border-radius:6px;padding:7px 9px;font-size:11px;font-family:inherit;box-sizing:border-box">
+             border-radius:6px;padding:7px 9px;font-size:11px;font-family:inherit;box-sizing:border-box;margin:4px 0 12px">
+
+    <div style="font-size:11px;margin-bottom:3px">Tavily <span style="color:var(--text3);font-weight:400">— 1,000 free/mo, cleaner for AI answers</span></div>
+    <a href="https://tavily.com" target="_blank" rel="noopener" style="font-size:10px;color:var(--acc)">Get a free key →</a>
+    <input type="password" id="s-tavily-key" placeholder="Tavily API key"
+      onchange="saveSetting('tavilyApiKey',this.value)"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);
+             border-radius:6px;padding:7px 9px;font-size:11px;font-family:inherit;box-sizing:border-box;margin:4px 0 12px">
+
+    <div style="font-size:11px;color:var(--text3)">
+      DuckDuckGo — always available, no key needed. Works well for factual/definition questions, weaker for general search (it's not a full search engine API).
+    </div>
   </div>
 
   <div class="settings-section">
