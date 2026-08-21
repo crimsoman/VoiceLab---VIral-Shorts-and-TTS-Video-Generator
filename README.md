@@ -8,7 +8,7 @@ voiceover studio, a video composer with auto-captions, and a viral-clip
 finder that watches your footage and tells you what to cut — all talking
 to each other, all running entirely on your own machine.
 
-> Built by **Ashmit**. Code implementation with Claude (Anthropic).
+> Built by **Ashmit Sharma** a.k.a **crimsoman**. 
 > If you build on this, a credit/link back is appreciated but not required —
 > see [LICENSE](./LICENSE).
 
