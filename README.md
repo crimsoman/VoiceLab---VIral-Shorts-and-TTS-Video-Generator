@@ -3,10 +3,10 @@
 **An all-in-one, 100% local AI video/voiceover studio.**
 No cloud, no subscriptions, no API keys required. Everything runs on your own PC.
 
-VoiceLab helps you turn raw footage into finished short-form video clips —
-AI chat with a local model, voiceover scripts, text-to-speech, voice
-cloning, auto-captions with emoji, background music, and one-click
-vertical export — all from a single web page running on your own computer.
+VoiceLab is four tools in one — a local AI chat assistant, a full TTS
+voiceover studio, a video composer with auto-captions, and a viral-clip
+finder that watches your footage and tells you what to cut — all talking
+to each other, all running entirely on your own machine.
 
 > Built by **Ashmit**. Code implementation with Claude (Anthropic).
 > If you build on this, a credit/link back is appreciated but not required —
@@ -16,41 +16,95 @@ vertical export — all from a single web page running on your own computer.
 
 ## Screenshots
 
-<!--
-  Drop your own screenshots into an `images/` folder in the repo root,
-  matching these filenames, and they'll render automatically on GitHub.
-  Take them at a normal desktop window width (not maximized ultra-wide)
-  so the UI reads clearly.
--->
-
 ### 💬 Chat
-Talk to any local Ollama model. Toggle **Thinking mode** to see the
-model's full reasoning before it answers, turn on **Web search** (Brave,
-Tavily, or DuckDuckGo — pick one or let it auto-fallback) to ground
-answers in current info with cited sources, and every response shows
-live stats (model, tokens, speed) on click. Full conversation history
-with rename/pin/search/export/delete.
+Not just a chatbox — this is a full local ChatGPT-style assistant wired
+into an Ollama model of your choice.
 
-![Chat tab](images/chat.png)
+- **Thinking mode**: watch the model's actual reasoning stream in live,
+  before it commits to a final answer — toggle it per-conversation from
+  the `+` menu.
+- **Web search, 3 providers**: Brave, Tavily, or DuckDuckGo — pick one
+  manually or let "Auto" try them in priority order. Answers come back
+  with cited sources.
+- **File attach**: drop in an image (works with vision-capable models)
+  or a text file for the model to read.
+- Every response can be sent straight into TTS Studio, turned into a
+  thumbnail prompt, or used to generate background music — the chat
+  output feeds the rest of the app directly.
+- Full conversation history: rename, pin, search, export as text, or
+  delete any past chat.
+
+![Chat main view](images/chat-1.png)
+![Chat + menu — thinking mode and web search provider selection](images/chat-2-plus-menu.png)
 
 ### 🎙️ TTS Studio
-Turn any script into voiceover — Edge TTS (free, cloud-quality voices) or
-Kokoro (fully local). Speed/pitch/EQ controls, AI-assisted script
-polishing, hook + metadata generation for YouTube.
+A real voiceover studio, not a single "generate" button.
 
-![TTS Studio tab](images/tts-studio.png)
+- **4 engines**: Edge TTS (free, cloud-quality, dozens of languages),
+  Kokoro (fully offline), Clone (your own voice), and Parler
+  (style-conditioned generation).
+- **Full voice library** searchable by language or accent — Hindi,
+  Bengali, Tamil, Telugu, Marathi, Punjabi, Urdu, Arabic, Japanese,
+  Korean, and more, each with named character voices (not just "Voice 1,
+  Voice 2").
+- **Speed/pitch/EQ** (bass, treble, normalize, compress, reverb) tuned
+  per generation, with an audio Analyze tool.
+- **AI Refine** on the script itself — Polish, Shorten, Hook+CTA, Fix
+  Grammar, Casual tone — plus one-click **Hook (A/B) and
+  Title/Description/Tags generation** for YouTube, all from the same
+  local model powering Chat.
+- Generates real playable output with a scrubbable preview, WAV
+  download, subtitle extraction, and a direct "Use in Video" handoff
+  into Video Studio — no manual file juggling between tools.
+
+![TTS Studio — voice library](images/tts-studio-1-voices.png)
+![TTS Studio — audio controls and generation in progress](images/tts-studio-2-controls.png)
+![TTS Studio — finished voiceover with preview, download, and Use in Video](images/tts-studio-3-result.png)
 
 ### 🎬 Video Studio
-Auto-captions with emoji, AI thumbnail generation, background music, and
-one-click vertical export ready for Shorts/Reels/TikTok.
+Takes raw gameplay/footage straight to a finished, captioned, exportable
+short.
 
-![Video Studio tab](images/video-studio.png)
+- Presets for **YouTube (16:9), TikTok (9:16), Instagram (1:1)** at up
+  to QHD 1440p, with a live style preview before you commit.
+- **Karaoke-style word-highlight captions**, burned in with configurable
+  style, layout, and color — auto-generated from whichever voiceover you
+  picked, no manual subtitle timing.
+- **AI thumbnail generator** — pull a frame straight from the gameplay
+  or generate one entirely with AI, then overlay a hook line pulled
+  directly from a Chat-generated hook.
+- **Background music** — upload your own or generate one with AI,
+  mixed automatically under the voiceover.
+- **Render queue** — queue multiple compositions and let them process
+  back to back instead of babysitting one export at a time.
+
+![Video Studio — clip editor with format presets](images/video-studio-1-edit.png)
+![Video Studio — full compose flow: voiceover, captions, thumbnail, music, queue](images/video-studio-2-compose.png)
 
 ### ✂️ Clip Finder
-Import long-form footage, transcribe it automatically, and find the best
-short clips to cut — all processed locally.
+This is the deepest tab in the app — it doesn't just cut clips, it
+**watches and understands the footage** to find the moments worth
+posting.
 
-![Clip Finder tab](images/clip-finder.png)
+- Import any long-form recording, and it **transcribes the whole thing
+  automatically** (28 segments in the example above) — fully local,
+  no cloud transcription service.
+- **Find Viral Moments** doesn't just read the transcript — when a
+  vision-capable model is selected (like `qwen2.5vl`), it does **real
+  frame-by-frame visual analysis alongside the transcript**, so it can
+  catch visually interesting moments that never got said out loud.
+- Tunable analysis depth (Fast / Balanced / Thorough / Custom, with
+  direct control over transcript chunk size, scene-cut sensitivity,
+  audio-energy window, and how many vision frames get sampled per clip)
+  — trade speed for thoroughness depending on your hardware and how
+  long the source footage is.
+- Each candidate moment gets its own independent voiceover script,
+  engine, and voice — nothing is forced to match globally.
+- Exports straight to Shorts/Reels format with burned-in captions,
+  smart or manual caption-to-audio matching, and AI-context-aware emoji
+  captions, ready to post.
+
+![Clip Finder — transcribing and finding viral moments with real vision analysis](images/clip-finder-1-viral-moments.png)
 
 ---
 
@@ -70,6 +124,7 @@ short clips to cut — all processed locally.
 | Web search in chat | A free API key (Brave or Tavily) *or* nothing at all (DuckDuckGo works with zero setup) | Chat still works without any search |
 | Voiceover (Edge TTS / Kokoro) | Nothing extra | Always works |
 | Captions + emoji, video export | Nothing extra (ffmpeg is auto-installed) | Always works |
+| Clip Finder's vision-based moment finding | A vision-capable Ollama model (e.g. `qwen2.5vl`) | Falls back to transcript-only analysis with a text model |
 | AI thumbnail / AI music / voice clone | A one-click install from inside the app | App still runs, just skips those tabs |
 
 The app **scans your PC's RAM/GPU automatically** and recommends AI models
@@ -159,6 +214,10 @@ most common setup and usage issues in plain English with exact fixes.
 - Web search is provider-agnostic (`web_search_dispatch()` in
   `server.py`) — auto-fallback across Brave/Tavily/DuckDuckGo or a
   forced single provider, same interface either way
+- Clip Finder's vision analysis path is separate from its transcript-only
+  path — it detects whether the selected model supports vision and
+  changes its own analysis strategy accordingly, rather than always
+  running the heavier pass
 
 Contributions/forks welcome under the MIT license. A mention of the
 original author is appreciated if you build something on top of this.
