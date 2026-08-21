@@ -59,25 +59,24 @@ git push -u origin main
 You'd create the empty repo on GitHub's website first (green **New**
 button on your GitHub homepage) before running the last two lines.
 
-## Adding your README screenshots
+## Adding the README screenshots
 
-The README references 4 screenshots (`images/chat.png`,
-`images/tts-studio.png`, `images/video-studio.png`,
-`images/clip-finder.png`) that don't exist yet — you need to add them:
+Claude already prepared the 8 screenshot files for you (from the ones you
+uploaded), correctly named to match the README exactly. You just need to
+get them into the repo's `images/` folder:
 
-1. Run VoiceLab and take a clean screenshot of each of the 4 tabs
-   (Chat, TTS Studio, Video Studio, Clip Finder). A normal-width desktop
-   window works best — not maximized ultra-wide, so the screenshot isn't
-   mostly empty space.
-2. Rename them exactly: `chat.png`, `tts-studio.png`, `video-studio.png`,
-   `clip-finder.png`.
-3. On your repo's GitHub page, click **Add file → Create new file**,
-   type `images/chat.png` as the filename (the `images/` prefix creates
-   the folder automatically) — but since this is an image, use
-   **Add file → Upload files** instead, and just drag all 4 images in at
-   once. GitHub will put them wherever you dropped them; if you drag them
-   in from the repo's root page, they'll land in the root instead of
-   `images/` — click into a folder first, or create `images/` via the
-   "Create new file" trick above, then upload into that folder specifically.
-4. Commit. The README will start showing them automatically — refresh
-   the repo's main page to check.
+1. Download all 8 files from the chat if you haven't already:
+   `chat-1.png`, `chat-2-plus-menu.png`, `tts-studio-1-voices.png`,
+   `tts-studio-2-controls.png`, `tts-studio-3-result.png`,
+   `video-studio-1-edit.png`, `video-studio-2-compose.png`,
+   `clip-finder-1-viral-moments.png`
+2. In your browser, go directly to:
+   `https://github.com/<your-username>/<your-repo-name>/upload/main/images`
+   (this is your repo's normal "Upload files" page, with `/images` added
+   to the end — GitHub creates that folder automatically when you upload
+   into it this way, even though it doesn't exist yet).
+3. Drag all 8 images into that page at once.
+4. Scroll down, type a commit message like `Add screenshots`, click
+   **Commit changes**.
+5. Go back to your repo's main page and refresh — the README should now
+   show all the screenshots.
