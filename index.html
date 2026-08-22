@@ -4769,7 +4769,7 @@ function addSuggestionChips(bubble){
   chips.style.cssText='display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)';
 
   const suggestions = [
-    {label:'🎙 Use as Script', onclick:`sendToTTS(this.closest('.bubble').querySelector('div'))`},
+    {label:'🎙 Use as Script', onclick:`sendToTTS(this.closest('.bubble').querySelector('.msg-text'))`},
     {label:'🎨 Make Thumbnail', onclick:`openChatGenComposer('image', this)`},
     {label:'🎵 Generate Music', onclick:`openChatGenComposer('music', this)`},
   ];
@@ -4820,6 +4820,7 @@ function addBubble(role,content,isStreaming,_){
   bubble.appendChild(thinkEl);
 
   const textEl=document.createElement('div');
+  textEl.className='msg-text';
   if(content) textEl.innerHTML=marked.parse(content);
   bubble.appendChild(textEl);
 
@@ -4855,7 +4856,7 @@ function addBubble(role,content,isStreaming,_){
 
 function sendToTTS(btn){
   const bub=btn.closest('.bubble');
-  const txt=bub.querySelector('div').innerText||bub.querySelector('div').textContent;
+  const txt=bub.querySelector('.msg-text').innerText||bub.querySelector('.msg-text').textContent;
   document.getElementById('tts-ta').value=txt.trim();
   document.getElementById('tts-chars').textContent=txt.trim().length+' chars';
   switchTab('tts');
@@ -4866,7 +4867,7 @@ function sendToTTS(btn){
 
 function copyTxt(btn){
   const bub=btn.closest('.bubble');
-  navigator.clipboard.writeText(bub.querySelector('div').innerText||'');
+  navigator.clipboard.writeText(bub.querySelector('.msg-text').innerText||'');
   btn.textContent='✓ Copied';
   setTimeout(()=>btn.textContent='📋 Copy',2000);
 }
@@ -7558,7 +7559,7 @@ function openChatGenComposer(kind, sourceEl){
   const promptEl = document.getElementById('chat-gen-prompt');
   if(sourceEl && !promptEl.value.trim()){
     const bubble = sourceEl.closest ? sourceEl.closest('.bubble') : null;
-    const srcText = bubble ? (bubble.querySelector('div')?.innerText || '') : '';
+    const srcText = bubble ? (bubble.querySelector('.msg-text')?.innerText || '') : '';
     if(srcText.trim()){
       promptEl.value = srcText.trim().slice(0, 220);
     }
