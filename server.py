@@ -646,7 +646,7 @@ async def transcribe_audio(req: TranscribeRequest, background_tasks: BackgroundT
 
             job_id = audio_id
             transcription_jobs[job_id] = {"status": "processing", "srt": None, "error": None}
-            background_tasks.add_task(transcribe_background_from_file, job_id, audio_path)
+            background_tasks.add_task(transcribe_background_from_file, job_id, audio_path, audio_id)
             return {"job_id": job_id, "status": "queued"}
 
         # ── Legacy path (no audio_id given) — kept only for backward compat ──
@@ -698,14 +698,30 @@ def transcribe_background(job_id: str, audio: np.ndarray):
         transcription_jobs[job_id] = {"status": "failed", "srt": None, "error": str(e)}
 
 
-def transcribe_background_from_file(job_id: str, audio_path: str):
+def transcribe_background_from_file(job_id: str, audio_path: str, audio_id: str = ""):
     """Background transcription worker — transcribes an EXISTING audio file
     directly (no regeneration), so it works identically regardless of which
-    TTS engine produced it (Kokoro, Edge, Parler, Voice Clone). language=None
-    lets faster-whisper auto-detect, so non-English Edge TTS output (Hindi,
-    Tamil, etc.) is transcribed correctly instead of being forced to English."""
+    TTS engine produced it (Kokoro, Edge, Parler, Voice Clone).
+
+    FIXED: previously always auto-detected the language (language=None),
+    which lets faster-whisper guess wrong on non-English audio - e.g. Hindi
+    getting misdetected and transcribed in the wrong script entirely,
+    producing garbled output. Now looks up the actual voice used (Edge TTS
+    voice names carry a locale code, e.g. "hi-IN-MadhurNeural" = Hindi) and
+    passes that as an explicit hint. Falls back to auto-detect for engines
+    whose voice names don't carry a locale code (Kokoro, Clone, Parler)."""
+    lang_hint = None
+    if audio_id:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            row = conn.execute("SELECT voice FROM exports WHERE id = ?", (audio_id,)).fetchone()
+            conn.close()
+            if row and row[0] and re.match(r"^[a-z]{2}-[A-Z]{2}-", row[0]):
+                lang_hint = row[0].split("-")[0]
+        except Exception:
+            pass
     try:
-        segments, info = whisper_model.transcribe(audio_path, language=None, vad_filter=True)
+        segments, info = whisper_model.transcribe(audio_path, language=lang_hint, vad_filter=True)
 
         srt_content = ""
         for i, segment in enumerate(segments, 1):
@@ -2424,9 +2440,26 @@ def get_word_segments(audio_id: str, audio_path: str) -> list:
     if audio_id in WORD_CACHE:
         return WORD_CACHE[audio_id]
 
+    # Look up the actual language the voiceover was generated in, instead of
+    # letting Whisper guess. Auto-detect (language=None) on a small "base"
+    # model can genuinely misidentify the spoken language - e.g. Hindi
+    # audio getting misdetected and transcribed in the wrong script
+    # entirely, producing garbled mixed-script captions. Edge TTS voice
+    # names always start with a locale code ("hi-IN-MadhurNeural" = Hindi),
+    # so we can derive a reliable hint from that instead of guessing.
+    lang_hint = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT voice FROM exports WHERE id = ?", (audio_id,)).fetchone()
+        conn.close()
+        if row and row[0] and re.match(r"^[a-z]{2}-[A-Z]{2}-", row[0]):
+            lang_hint = row[0].split("-")[0]  # "hi-IN-MadhurNeural" -> "hi"
+    except Exception:
+        pass  # any lookup failure just falls back to auto-detect below - never a hard failure
+
     def _run(vad: bool):
         segments_iter, _ = whisper_model.transcribe(
-            audio_path, word_timestamps=True, language=None, beam_size=5, vad_filter=vad
+            audio_path, word_timestamps=True, language=lang_hint, beam_size=5, vad_filter=vad
         )
         out = []
         for seg in segments_iter:
@@ -5974,13 +6007,23 @@ def _cf_synthesize_voiceover(script: str, engine: str, voice: str, target_durati
     return vo_path
 
 
-def _cf_transcribe_vo_for_captions(vo_path: str) -> list:
+def _cf_transcribe_vo_for_captions(vo_path: str, voiceover_voice: str = "") -> list:
     """Re-transcribes the SYNTHESIZED voiceover (not the original recording)
     so burnt captions match the new narration's actual timing/words. Same
     shape as the sliced-original-segments path (start/end/text/words), and
-    already clip-local since the VO audio starts at t=0 for this clip."""
+    already clip-local since the VO audio starts at t=0 for this clip.
+
+    Passes an explicit language hint derived from the Edge TTS voice name
+    when available, instead of letting Whisper auto-detect - auto-detect on
+    the small "base" model can misidentify the spoken language (e.g. Hindi
+    audio transcribed in the wrong script entirely), producing garbled
+    captions. Falls back to auto-detect for non-Edge engines (Kokoro, etc.)
+    whose voice names don't carry a locale code."""
+    lang_hint = None
+    if voiceover_voice and re.match(r"^[a-z]{2}-[A-Z]{2}-", voiceover_voice):
+        lang_hint = voiceover_voice.split("-")[0]
     try:
-        segments_iter, _ = whisper_model.transcribe(vo_path, word_timestamps=True, language=None, beam_size=5, vad_filter=False)
+        segments_iter, _ = whisper_model.transcribe(vo_path, word_timestamps=True, language=lang_hint, beam_size=5, vad_filter=False)
         out = []
         for seg in segments_iter:
             words = [{"word": w.word, "start": w.start, "end": w.end} for w in (seg.words or [])]
@@ -6060,7 +6103,7 @@ def _clipfinder_export_worker(job_id: str, req: ClipFinderExportRequest):
             clip_segments = []
             if req.auto_caption:
                 if use_vo_captions and vo_path:
-                    vo_transcript_segments = _cf_transcribe_vo_for_captions(vo_path)
+                    vo_transcript_segments = _cf_transcribe_vo_for_captions(vo_path, req.voiceover_voice)
                     clip_segments = vo_transcript_segments
                 else:
                     # Slice + rebase ORIGINAL word segments to 0 for this clip's own timeline
